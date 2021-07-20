@@ -1,0 +1,293 @@
+{% extends 'mnist/base.html' %}
+
+{% load static %}
+
+{% block content %}
+
+<div class="row">
+
+  <div class="col-md-3 cell">
+
+    <canvas id="canvas" width="280" height="280" style="border: 1px solid black;"></canvas>
+    <div id="coord"></div>
+
+  </div>   
+
+  <div class="col-md-3 cell">
+
+    <input type="button" value="Clear image" onclick="clear_image()">
+
+    <div id="show1" style="font-size:2em; font-weight: bold;"></div>
+    <div id="show2"></div>
+    <div id="show3"></div>
+    <div id="show4"></div>
+
+  </div>
+
+  <div class="col-md-6 cell">
+
+    <canvas id="myBarChart" style="width:100%;max-width:600px"></canvas>
+
+  </div>
+</div>   
+
+
+
+
+<script>
+var xValues = ["0", "1", "2", "3", "4","5","6","7","8","9"];
+var yValues = [0,0,0,0,0,0,0,0,0,0];
+var barColors = ["blue", "blue","blue","blue","blue","blue", "blue","blue","blue","blue"];
+
+var myChart = new Chart("myBarChart", {
+  type: "bar",
+  data: {
+    labels: xValues,
+    datasets: [{
+      backgroundColor: barColors,
+      data: yValues
+    }]
+  },
+  options: {
+    legend: {display: false},
+    title: {
+      display: true,
+      text: "Predictions"
+    }
+  }
+});
+
+var p = [0.7,0.3,0.01,0.01,0.02,0.02,0.03,0.03,0.04,0.04];
+
+function updateBarChart(p) {
+  myChart.data.datasets[0]['data'] = p;
+  myChart.update();
+}
+
+</script>	
+
+
+<script>
+const show1 = document.getElementById("show1");
+const show2 = document.getElementById("show2");
+const show3 = document.getElementById("show3");
+const show4 = document.getElementById("show4");
+
+function display(div_id,msg){
+    div_id.innerHTML = msg;
+}
+
+async function f(x) {
+  const model = await tf.loadLayersModel('static/mnist/tfjs_app/model.json');		  
+  var out = model.predict(x);
+
+  var values = out.dataSync();
+  var arr = Array.from(values);		
+
+  //display(show3,arr);
+  updateBarChart(arr);		
+
+  var prediction = out.argMax(1);
+
+  var values2 = prediction.dataSync();
+  var arr2 = Array.from(values2);		
+
+  //js tf cnn out
+  display(show1,"Prediction: " + values2);
+}
+
+function response_callback(response) {
+    var result = response.result;
+    
+    //display(show2,"server(py tf): " + result);
+    var x_img = response.x;
+    var x = tf.tensor(response.x);  
+    f(x);  
+}
+
+function mouse_callback(){
+    send2();	
+}
+
+
+// We need an XMLHttpRequest instance
+// const xhr = new XMLHttpRequest();
+
+function getXHR(){
+    var xhr = false;
+    if (window.XMLHttpRequest) {
+        xhr = new XMLHttpRequest();
+    } else { //code for IE6, IE5
+        xhr = new ActiveXObject("Microsoft.XMLHTTP");
+    }
+    return xhr;
+}
+
+function message(msg){
+    alert(msg);
+}
+
+xhr = getXHR();
+if(!xhr) message("Ajax is not supported by your browser!");
+
+xhr.onload = function() {
+    if (xhr.status === 200){
+        //message(xhr.responseText);
+        const response = JSON.parse(xhr.responseText);
+        //alert(response.result);
+        response_callback(response);
+    }
+    else{
+        message("Error " + xhr.status);
+    }
+}
+
+xhr.onerror = function() {
+    message("Error: No response from server.");
+}	
+
+function send2(){	
+
+    // We need a separator to define each part of the request
+    const boundary = "blob";
+
+    // body request data.
+    let data = "";    
+
+    let image = canvas.toDataURL("image/png");
+
+    //adding a file ---------------------------------
+
+    // Start a new part in our body's request
+    data += "--" + boundary + "\r\n";
+
+    // Describe it as form data
+    data += 'content-disposition: form-data; '
+    // Define the name of the form data
+          + 'name="'         + "image" + '"; '
+    // Provide the real name of the file
+          + 'filename="'     + "image" + '"\r\n';
+    // And the MIME type of the file
+    data += 'Content-Type: ' + 'base64' + '\r\n';
+
+    // There's a blank line between the metadata and the data
+    data += '\r\n';    
+
+    // Append the binary data to our body's request
+    data += image + '\r\n';
+
+    //------------------------------------------------
+
+
+    // adding text -----------------------------------
+
+    // Start a new part in our body's request
+    data += "--" + boundary + "\r\n";
+
+    // Say it's form data, and name it
+    data += 'content-disposition: form-data; name="' + "test" + '"\r\n';
+    
+    // There's a blank line between the metadata and the data
+    data += '\r\n';
+
+    // Append the text data to our body's request
+    data += "message: hello" + "\r\n";
+
+    //------------------------------------------------
+
+    // Once we are done, "close" the body's request
+    data += "--" + boundary + "--";    
+
+    
+    xhr.open('POST', "send_image");
+
+    // Add the required HTTP header to handle a multipart form data POST request
+    xhr.setRequestHeader( 'Content-Type','multipart/form-data; boundary=' + boundary );    
+
+    //Django settings==========================================================
+    /****  include {% csrf_token %} in template or ... ****/
+    var csrf_token = document.getElementsByName("csrfmiddlewaretoken")[0].value;
+    /****  ... render csrf in views.py  ****/
+    //var csrf_token = "{{ csrf_token }}"
+    xhr.setRequestHeader("X-CSRFToken", csrf_token );
+    //=========================================================================
+
+    xhr.send(data);
+
+ }
+
+</script>
+
+
+<script>
+
+var canvas = document.getElementById('canvas'),
+    coord = document.getElementById('coord'),
+    ctx = canvas.getContext('2d'), // get 2D context
+    //ctx.scale(2, 2)
+    //ctx.filter = 'grayscale(1)';		
+    imgCat = new Image();
+
+/*********** draw image *************/
+imgCat.src = 'http://c.wearehugh.com/dih5/openclipart.org_media_files_johnny_automatic_1360.png';
+imgCat.onload = function() { // wait for image load
+    ctx.drawImage(imgCat, 0, 0); // draw imgCat on (0, 0)
+};
+
+/*********** handle mouse events on canvas **************/
+var mousedown = false;
+ctx.strokeStyle = '#000000';
+ctx.lineWidth = 20; //40,45 seems to be good
+canvas.onmousedown = function(e) {
+    var pos = fixPosition(e, canvas);
+    mousedown = true;
+    ctx.beginPath();
+    ctx.moveTo(pos.x, pos.y);
+    return false;
+};
+
+canvas.onmousemove = function(e) {
+    var pos = fixPosition(e, canvas);
+    coord.innerHTML = '(' + pos.x + ',' + pos.y + ')';
+    if (mousedown) {
+        ctx.lineTo(pos.x, pos.y);
+        ctx.stroke();
+    }
+    mouse_callback();		
+};
+
+canvas.onmouseup = function(e) {
+    mousedown = false;
+};
+
+/********** utils ******************/
+// Thanks to http://stackoverflow.com/questions/55677/how-do-i-get-the-coordinates-of-a-mouse-click-on-a-canvas-element/4430498#4430498
+function fixPosition(e, gCanvasElement) {
+    var x;
+    var y;
+    if (e.pageX || e.pageY) {
+      x = e.pageX;
+      y = e.pageY;
+    }
+    else {
+      x = e.clientX + document.body.scrollLeft +
+          document.documentElement.scrollLeft;
+      y = e.clientY + document.body.scrollTop +
+          document.documentElement.scrollTop;
+    }
+    x -= gCanvasElement.offsetLeft;
+    y -= gCanvasElement.offsetTop;
+    return {x: x, y:y};
+}
+
+</script>	
+
+<script>
+function clear_image(){
+    const context = canvas.getContext('2d');
+    context.clearRect(0, 0, canvas.width, canvas.height);
+}
+</script>
+
+{% endblock content %}
+
